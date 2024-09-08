@@ -13,6 +13,9 @@ This project explores the dynamic relationships between cryptocurrency prices an
 - **Short-Term Strategy:** Based on VAR analysis, trade BTC, ETH, and MKR during short-term price trends, with options for hedging risks.
 - **Long-Term Convergence Strategy:** Utilize cointegration analysis to develop strategies by trading BTC, MKR, and financial indices, including hedging with options.
 
+  <img width="975" alt="image" src="https://github.com/user-attachments/assets/0e6912d0-93d6-4b0f-b540-3c4710764a22">
+
+
 ## Conclusion:
 Our study provides insights into the intricate relationships between cryptocurrencies and traditional financial assets, offering robust trading strategies for investors. Further enhancements using deep learning models and real-time data could refine these strategies and improve predictive accuracy.
 
