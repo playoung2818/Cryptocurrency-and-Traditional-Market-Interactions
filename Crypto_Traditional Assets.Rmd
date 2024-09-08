@@ -1,0 +1,445 @@
+---
+title: "Crypto_Traditional Assets"
+author: "Zheyuan Chen"
+date: "2023-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+data_all = read.csv('rates & prices.csv')
+head(data_all)
+```
+
+#Calculate daily changes to those rates. During weekends, we just skip two days to get an equivalent change rate, as traditional market only runs on weekdays.
+```{r}
+data_1 = data_all[complete.cases(data_all),]
+data_1[,3:15] = as.data.frame(lapply(data_1[,3:15], function(x) as.numeric(gsub(",", "", x))))
+
+n = nrow(data_1)
+data_1$btc_r = c(NA, (data_1$btc_price[2:n]-data_1$btc_price[1:(n-1)]) / (data_1$btc_price[1:(n-1)]))
+data_1$dow_r = c(NA, (data_1$dow_price[2:n]-data_1$dow_price[1:(n-1)]) / (data_1$dow_price[1:(n-1)]))
+data_1$eth_r = c(NA, (data_1$eth_price[2:n]-data_1$eth_price[1:(n-1)]) / (data_1$eth_price[1:(n-1)]))
+data_1$mkr_r = c(NA, (data_1$mkr_price[2:n]-data_1$mkr_price[1:(n-1)]) / (data_1$mkr_price[1:(n-1)]))
+data_1$sp_r = c(NA, (data_1$SP_price[2:n]-data_1$SP_price[1:(n-1)]) / (data_1$SP_price[1:(n-1)]))
+data_1$bdi_r = c(NA, (data_1$bond_index[2:n]-data_1$bond_index[1:(n-1)]) / (data_1$bond_index[1:(n-1)]))
+data_1$cny_r = c(NA, (data_1$USD_CNY_rate[2:n]-data_1$USD_CNY_rate[1:(n-1)]) / (data_1$USD_CNY_rate[1:(n-1)]))
+data_1$bdi_10_r = c(NA, (data_1$bond_10_index[2:n]-data_1$bond_10_index[1:(n-1)]) / (data_1$bond_10_index[1:(n-1)]))
+data_1$dow_re_r = c(NA, (data_1$dow_re_price[2:n]-data_1$dow_re_price[1:(n-1)]) / (data_1$dow_re_price[1:(n-1)]))
+head(data_1)
+```
+#Simple linear Regressions on return rates
+
+```{r}
+names_i = c('prime_loan_rate','dow_r','sp_r','bdi_r','cny_r','federal_rate','X13_week_yield','X2_year_yield','X5_year_yield','X10_year_yield', 'bdi_10_r', 'dow_re_r')
+names_d = c('btc_r','eth_r','mkr_r')
+names_d_p = c('btc_price','eth_price','mkr_price')
+names_i_p = c('dow_price','bond_index','SP_price','bond_10_index','dow_re_price')
+
+models_p = vector("list")
+index = 1
+for (i in names_d_p) {
+  for(j in names_i_p) {
+  modfrmj = as.formula(paste0(i,"~",j))
+  models_p[[index]] = modfrmj
+  index = index + 1
+  }
+}
+#models_p       #models built with prices
+
+models = vector("list")
+index = 1
+for (i in names_d) {
+  for(j in names_i) {
+  modfrmj = as.formula(paste0(i,"~",j))
+  models[[index]] = modfrmj
+  index = index + 1
+  }
+}
+#models         #models built with changes in prices(return)
+```
+
+```{r}
+models_summary = vector('list')
+models_pv = vector('list')
+for (i in 1:36){
+  models_summary[[i]] = summary(lm(models[[i]],data = data_1))
+  models_pv[i] = models_summary[[i]]$coefficients[2,"Pr(>|t|)"]
+}
+#models_pv
+```
+
+```{r}
+models_summary_p = vector('list')
+models_pv_p = vector('list')
+for (i in 1:15){
+  models_summary[[i]] = summary(lm(models_p[[i]],data = data_1))
+  models_pv_p[i] = models_summary[[i]]$coefficients[2,"Pr(>|t|)"]
+}
+#models_pv_p
+```
+
+```{r}
+models[models_pv<0.01]
+```
+```{r}
+models_p[models_pv_p<0.001]
+```
+
+#DCC model
+
+```{r}
+#install.packages("rmgarch")
+library(rmgarch)
+```
+
+```{r}
+data_2 = data_1[,2:26]
+data_2[,1] = as.Date(data_2[,1])
+#Fit DCC model with pairs of variables
+#data_3 = data_2[c('btc_price','dow_price')]
+
+dcc_spec = dccspec(uspec = multispec(
+      replicate(2, ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)))
+      )
+))
+
+DCC_models = vector("list",15)
+index = 1
+
+for (i in names_d_p) {
+  for (j in names_i_p) {
+  data = data_2[c(i,j)]
+  dcc_md = dccfit(dcc_spec, data = data)
+  DCC_models[[index]] = dcc_md
+  index = index + 1
+  }
+}
+
+DCC_models[[1]] #1-15
+```
+
+```{r}
+#install.packages("vars")
+library(vars)
+```
+
+```{r}
+data_4 = cbind(data_2[names_d_p],data_2[names_i_p])
+data_5 = cbind(data_2[names_d],data_2[names_i])
+data_5 = data_5[2:nrow(data_5),]
+
+lag_order_p = VARselect(data_4, type = "const")$selection[1]#Choose best lag value
+
+var_p = VAR(data_4, p = lag_order_p, type = "none") #p is the lagged value that can be modified to find better models
+
+lag_order_r = VARselect(data_5, type = "const")$selection[1]
+
+var_r = VAR(data_5, p = lag_order_r, type = "none")
+
+#Store siginificant variables
+names_b = names(coef(var_p)$btc_price[,4][coef(var_p)$btc_price[,4]<0.05])
+#Significant level can be modified
+names_e = names(coef(var_p)$eth_price[,4][coef(var_p)$eth_price[,4]<0.05])
+
+names_m = names(coef(var_p)$mkr_price[,4][coef(var_p)$mkr_price[,4]<0.05])
+
+#coef(var_r)$mkr_price
+```
+# Majority of market rates' lagged values are not statistically significant, and cannot be used to predict crptocurrency prices accurately. So we will introduce deep learning models later to make some prediction.
+
+#Those statistically siginificant lagged values will be included in the input layer.
+#Multicollinearity bettween variables
+
+```{r}
+#install.packages("urca")
+library(urca)
+```
+
+#Cointegration analysis
+#Part 1 (price)
+```{r}
+coin_result_p = vector('list')
+index = 1
+
+for (i in names_d_p){
+  for (j in names_i_p){
+  data_c = data_4[c(i,j)]
+  coin_t_p = ca.jo(data_c, type = "eigen", ecdet = "trend", K = 2)
+  coin_result_p[[index]] = summary(coin_t_p)
+  index = index + 1
+  }
+}
+
+coin_result_p[[12]]#index from 1-15
+```
+#mkr-price ~ bond-index (after scaling process)
+```{r}
+data_mb = data_4[c('mkr_price','bond_index','bond_10_index')]
+data_mb_sc = data.frame(scale(data_mb))
+coin_mb = ca.jo(data_mb_sc, type = "eigen", ecdet = "trend", K = 10)
+summary(coin_mb)
+```
+#mkr-price ~ bond-index (after log process)
+```{r}
+data_mb_lg = data.frame(data_mb)
+data_mb_lg$mkr_price = log(data_mb$mkr_price)
+data_mb_lg$bond_index = log(data_mb$bond_index)
+data_mb_lg$bond_10_index = log(data_mb$bond_10_index)
+
+coin_mb_lg = ca.jo(data_mb_lg, type = "eigen", ecdet = "trend", K = 3)
+summary(coin_mb_lg)
+```
+
+#mkr-price ~ bond-index (after lag process)
+```{r}
+data_mb_lag = data.frame(data_mb)
+data_mb_lag$bond_index = dplyr::lag(data_mb$bond_index, n = 1)
+data_mb_lag$bond_10_index = dplyr::lag(data_mb$bond_10_index, n = 1)
+
+coin_mb_lg = ca.jo(data_mb_lg, type = "eigen", ecdet = "trend", K = 3)
+summary(coin_mb_lg)
+```
+
+#Part 2 (change rate)
+```{r}
+coin_result_r = vector('list')
+index = 1
+
+for (i in names_d){
+  for (j in names_i){
+  data_c = data_5[c(i,j)]
+  coin_t_r = ca.jo(data_c, type = "eigen", ecdet = "const", K = 2)
+  coin_result_r[[index]] = summary(coin_t_r)
+  index = index + 1
+  }
+}
+
+coin_result_r[[36]]#index from 1-36
+```
+#Deep learning models
+```{r}
+#Prepare input variables to determine input layer size
+names_be = union(names_b,names_e)
+names_bem = union(names_be,names_m)
+names_o = c('Date','dow_price','bond_index','SP_price','bond_10_index','dow_re_price')
+names_bem
+```
+#Split those varibale names to get lagged values ready in our deep-learning model building
+```{r}
+library(stringr)
+lag_vs = c()
+
+for (i in 1:length(names_bem)){
+  lag_vs[i] = as.numeric(str_extract(names_bem[i], "(\\d+)$"))
+}
+
+lag_vs
+```
+
+```{r}
+var_o = c()
+
+for (i in 1:length(names_bem)){
+  var_o[i] = str_extract(names_bem[i], ".*(?=\\.)")
+}
+
+var_o
+```
+
+```{r}
+data_dl = data_1[names_o]
+
+for (i in 1:length(lag_vs)){
+  name_o = var_o[i]
+  data = cbind(data_2['Date'], data_2[name_o])
+  data_lagged = dplyr::lag(data, n=lag_vs[i])
+  data_lagged = data_lagged[,2]
+  data_dl = cbind(data_dl,data_lagged)
+  names(data_dl)[6+i] = names_bem[i]
+} 
+
+data_dl = cbind(data_dl, data_2[names_d_p])
+data_dl = data_dl[11:nrow(data_dl),]
+
+head(data_dl)
+```
+
+```{r}
+#install.packages("keras")
+library(keras)
+
+#install_keras() 
+#Run the line of code above if you didn't set up tensorflow environment. 
+```
+
+#In following parts, run each three crypto currency price prediction chunks separately.
+#use all data, including lagged data to predict btc price
+```{r}
+#split train and test set
+set_train = data_dl[1:as.integer(0.9*dim(data_dl)[1]),]
+set_test = data_dl[(as.integer(0.9*dim(data_dl)[1])+1):dim(data_dl)[1],]
+
+num_features = 40
+num_samples = nrow(set_train)
+
+input_features = matrix(unlist(set_train[,c(-1,-40)]))
+target = set_train[,40]
+dim(input_features) = c(num_samples, 1, num_features)
+dim(target) = c(num_samples, 1, 1)
+
+test_features = matrix(unlist(set_test[,c(-1,-40)]))
+test_target = set_test[,40]
+dim(test_features) = c(nrow(set_test), 1, num_features)
+dim(test_target) = c(nrow(set_test), 1, 1)
+```
+
+```{r}
+set.seed(331)
+model_btc = keras_model_sequential()
+model_btc %>% 
+  layer_lstm(units = 128, input_shape = c(1, num_features)) %>%
+  layer_dense(units = 64) %>%
+  layer_dense(units = 16) %>%
+  layer_dense(units = 1)
+
+model_btc %>%  
+compile(
+    loss = "mae", 
+    optimizer = "adam",
+    metrics = c("mape")
+  )
+
+early_stopping = callback_early_stopping(
+  monitor = 'val_loss', 
+  patience = 100,         
+  restore_best_weights = TRUE
+)
+
+num_epochs = 200
+
+history = model_btc %>% fit(
+  x = input_features,
+  y = target,
+  epochs = num_epochs,
+  validation_data = list(test_features, test_target),
+  callbacks = list(early_stopping)
+)
+
+#results = model %>% evaluate(
+  #x = test_features,
+  #y = test_target
+#)
+
+#results
+```
+
+```{r}
+results = model_btc %>% evaluate(
+  x = test_features,
+  y = test_target
+)
+
+results
+```
+
+#eth price prediction
+```{r}
+input_features = matrix(unlist(set_train[,c(-1,-41)]))
+target = set_train[,41]
+dim(input_features) = c(num_samples, 1, num_features)
+dim(target) = c(num_samples, 1, 1)
+
+test_features = matrix(unlist(set_test[,c(-1,-41)]))
+test_target = set_test[,41]
+dim(test_features) = c(nrow(set_test), 1, num_features)
+dim(test_target) = c(nrow(set_test), 1, 1)
+```
+
+```{r}
+set.seed(331)
+model_eth = keras_model_sequential()
+model_eth %>% 
+  layer_lstm(units = 128, input_shape = c(1, num_features)) %>%
+  layer_dense(units = 64) %>%
+  layer_dense(units = 16) %>%
+  layer_dense(units = 1)
+
+model_eth %>%  
+compile(
+    loss = "mae", 
+    optimizer = "adam",
+    metrics = c("mape")
+  )
+
+history = model_eth %>% fit(
+  x = input_features,
+  y = target,
+  epochs = num_epochs,
+  validation_data = list(test_features, test_target),
+  callbacks = list(early_stopping)
+)
+```
+
+```{r}
+results = model_eth %>% evaluate(
+  x = test_features,
+  y = test_target
+)
+
+results
+```
+
+#mkr price prediction
+```{r}
+input_features = matrix(unlist(set_train[,c(-1,-42)]))
+target = set_train[,42]
+dim(input_features) = c(num_samples, 1, num_features)
+dim(target) = c(num_samples, 1, 1)
+
+test_features = matrix(unlist(set_test[,c(-1,-42)]))
+test_target = set_test[,42]
+dim(test_features) = c(nrow(set_test), 1, num_features)
+dim(test_target) = c(nrow(set_test), 1, 1)
+```
+
+```{r}
+set.seed(331)
+model_mkr = keras_model_sequential()
+model_mkr %>% 
+  layer_lstm(units = 128, input_shape = c(1, num_features)) %>%
+  layer_dense(units = 64) %>%
+  layer_dense(units = 16) %>%
+  layer_dense(units = 1)
+
+model_mkr %>%  
+compile(
+    loss = "mae", 
+    optimizer = "adam",
+    metrics = c("mape")
+  )
+
+history = model_mkr %>% fit(
+  x = input_features,
+  y = target,
+  epochs = num_epochs,
+  validation_data = list(test_features, test_target),
+  callbacks = list(early_stopping)
+)
+```
+
+```{r}
+results = model_mkr %>% evaluate(
+  x = test_features,
+  y = test_target
+)
+
+results
+```
+
+
+
